@@ -1,8 +1,6 @@
 # Hand Recognition Using AI
 ![제목 없음1](https://github.com/user-attachments/assets/f4b8a6ce-fdb0-44a8-a4d3-cd7211572fc5)
 
-![image](https://github.com/user-attachments/assets/b56b496e-2cc1-45a6-8ab9-94cb6c9c6ba7)
-
 ## 프로젝트 개요
 
 이 프로젝트는 손 이미지를 분류하는 신경망 모델을 구현하고, 이를 Django 웹 애플리케이션을 통해 시각적으로 결과를 보여주는 시스템을 개발하는 것을 목표로 했습니다. 모델은 손 이미지를 학습하고, 예측 결과를 실제 이미지와 비교하여 정확도를 시각적으로 평가합니다.
