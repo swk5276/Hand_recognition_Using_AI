@@ -1,4 +1,5 @@
 # Hand Recognition Using AI
+![제목 없음1](https://github.com/user-attachments/assets/f4b8a6ce-fdb0-44a8-a4d3-cd7211572fc5)
 
 ![image](https://github.com/user-attachments/assets/b56b496e-2cc1-45a6-8ab9-94cb6c9c6ba7)
 
