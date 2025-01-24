@@ -1,18 +1,24 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import random
 import csv
 import os
-import numpy as np
+from pathlib import Path
+
 
 # 신경망 하이퍼파라미터 설정
-input_size = 4096           # 입력 크기: 64x64 이미지의 총 픽셀 수 (4096)
+input_size = 4096              # 입력 크기: 64x64 이미지의 총 픽셀 수 (4096)
 hidden_layers = [256,240,220]  # 은닉층 노드 수
-output_size = 111            # 출력층 노드 수: 분류할 클래스 수
-learning_rate = 0.0001       # 학습률: 가중치 업데이트의 크기
-epochs = 350                  # 학습 데이터 전체를 얼마나 반복할지
+output_size = 111              # 출력층 노드 수: 분류할 클래스 수
+learning_rate = 0.0001         # 학습률: 가중치 업데이트의 크기
+epochs = 1                   # 전체 학습 데이터 반복 횟수
 
 #데이터 로드 함수 
 def load_data(sub_dir, file_name, output_size):
-    current_dir = os.getcwd()  # 현재 작업 디렉토리 경로 가져오기
-    file_path = os.path.join(current_dir, 'DATA', sub_dir, file_name)   # 데이터 파일 경로
+    BASE_DIR = Path(__file__).resolve().parent.parent  # visualization_project 기준의 경로
+    file_path = BASE_DIR / 'DATA' / sub_dir / file_name
+    print(f"Loading file from: {file_path}")
+
 
     pixel_data = [] # 픽셀 데이터
     labels = [] # 레이블(정답) 데이터
@@ -88,9 +94,8 @@ class NeuralNetwork:
         self.learning_rate = learning_rate  
         self.weights = [] 
         self.biases = []  
-        
-        
-        layer_sizes = [input_size] + hidden_layers + [output_size]  # 입력, 은닉, 출력층 노드 수
+        # 입력, 은닉, 출력층 노드 수
+        layer_sizes = [input_size] + hidden_layers + [output_size]  
         
         # 각 레이어 가중치와 편향 초기화
         for i in range(len(layer_sizes) - 1):
@@ -181,12 +186,55 @@ class NeuralNetwork:
         print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy * 100:.2f}%")
         return test_loss, test_accuracy
     
+#시각화
+def visualize_predictions_and_true_images_with_predicted_images(model, test_data, test_labels, num_samples=10):
+
+    # 테스트 데이터에서 무작위로 샘플 선택
+    indices = random.sample(range(len(test_data)), num_samples)
+    sampled_data = test_data[indices]
+    sampled_labels = test_labels[indices]
+
+    # 신경망 예측 수행
+    predictions = model.forward(sampled_data, training=False)
+    predicted_classes = np.argmax(predictions, axis=1)  # 예측된 클래스
+    true_classes = np.argmax(sampled_labels, axis=1)    # 실제 클래스
+
+    # 시각화 설정
+    fig, axes = plt.subplots(2, num_samples, figsize=(num_samples * 2, 5))
+
+    for i, index in enumerate(indices):
+        # Pred: 예측된 클래스에 해당하는 이미지를 찾음
+        pred_class = predicted_classes[i]
+        pred_image_index = np.argmax(np.argmax(test_labels, axis=1) == pred_class)
+        pred_image = test_data[pred_image_index]
+
+        # 예측 이미지 출력
+        axes[0, i].imshow(pred_image.reshape(64, 64), cmap="gray")
+        axes[0, i].axis("off")
+        axes[0, i].set_title(f"Pred: {pred_class}", color="green" if pred_class == true_classes[i] else "red")
+
+        # True: 실제 이미지 출력
+        axes[1, i].imshow(sampled_data[i].reshape(64, 64), cmap="gray")
+        axes[1, i].axis("off")
+        axes[1, i].set_title(f"True: {true_classes[i]}")
+
+    # 전체 레이아웃 조정
+    fig.suptitle("Predicted vs. True Images", fontsize=16)
+    plt.tight_layout()
+    plt.show()
+
+if __name__ == "__main__":    
     # 데이터 로드
-train_data, train_labels = load_data('train', 'train_data.csv', output_size)
-test_data, test_labels = load_data('test', 'test_data.csv', output_size)
+    train_data, train_labels = load_data('train', 'train_data.csv', output_size)
+    test_data, test_labels = load_data('test', 'test_data.csv', output_size)
 
-# 신경망 객체 생성
-nn = NeuralNetwork(input_size, hidden_layers, output_size, learning_rate)
+    # 신경망 객체 생성
+    nn = NeuralNetwork(input_size, hidden_layers, output_size, learning_rate)
 
-# 학습 실행
-nn.train(train_data, train_labels, epochs, learning_rate)
+    # 학습 실행
+    nn.train(train_data, train_labels, epochs, learning_rate)
+
+    # 테스트 데이터로 평가
+    nn.evaluate(test_data, test_labels)
+    # 시각화 함수 호출
+    visualize_predictions_and_true_images_with_predicted_images(nn, test_data, test_labels)
