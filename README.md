@@ -19,6 +19,9 @@
 - **CSV**: 손 이미지 데이터셋 로딩 및 전처리를 위한 데이터 포맷.
 
 ## 구현 과정
+![image](https://github.com/user-attachments/assets/19dc1429-0f03-49e6-a093-df4779628f20)
+![image](https://github.com/user-attachments/assets/57147358-7924-4057-bac6-aa8e78c37828)
+
 
 ### 1. 데이터 로딩 및 전처리
 
