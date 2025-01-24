@@ -1,4 +1,6 @@
-# Hand Recognition Using AI - Portfolio
+# Hand Recognition Using AI
+
+![image](https://github.com/user-attachments/assets/b56b496e-2cc1-45a6-8ab9-94cb6c9c6ba7)
 
 ## 프로젝트 개요
 
