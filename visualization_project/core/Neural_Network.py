@@ -4,21 +4,21 @@ import random
 import csv
 import os
 from pathlib import Path
+import pickle
 
 
 # 신경망 하이퍼파라미터 설정
 input_size = 4096              # 입력 크기: 64x64 이미지의 총 픽셀 수 (4096)
-hidden_layers = [256,240,220]  # 은닉층 노드 수
+hidden_layers = [256,196,128]  # 은닉층 노드 수
 output_size = 111              # 출력층 노드 수: 분류할 클래스 수
 learning_rate = 0.0001         # 학습률: 가중치 업데이트의 크기
-epochs = 1                   # 전체 학습 데이터 반복 횟수
+epochs = 100                  # 전체 학습 데이터 반복 횟수
 
 #데이터 로드 함수 
 def load_data(sub_dir, file_name, output_size):
     BASE_DIR = Path(__file__).resolve().parent.parent  # visualization_project 기준의 경로
     file_path = BASE_DIR / 'DATA' / sub_dir / file_name
     print(f"Loading file from: {file_path}")
-
 
     pixel_data = [] # 픽셀 데이터
     labels = [] # 레이블(정답) 데이터
@@ -40,7 +40,16 @@ def load_data(sub_dir, file_name, output_size):
     return np.array(pixel_data), np.array(labels)
 
 
-"활성화함수 정의"
+def iterate_minibatches(X, Y, batch_size=64, shuffle=True):
+    idx = np.arange(len(X))
+    if shuffle:
+        np.random.shuffle(idx)
+    for start in range(0, len(X), batch_size):
+        end = start + batch_size
+        batch = idx[start:end]
+        if len(batch) == 0:
+            continue
+        yield X[batch], Y[batch]
 
 #시그모이드 함수
 def sigmoid(x):
@@ -68,7 +77,8 @@ def tanh_derivative(x):
 
 # 출력층 활성화함수 정의
 def softmax(x):
-    exp_x = np.exp(x)  # 입력값 x에 대한 지수 함수 계산
+    x_shift = x - np.max(x, axis=1, keepdims=True)
+    exp_x = np.exp(x_shift)
     return exp_x / np.sum(exp_x, axis=1, keepdims=True)  # softmax: 확률로 변환
 
 "손실함수 정의"
@@ -76,6 +86,10 @@ def softmax(x):
 # 평균제곱오차
 def MSE(y_true, y_pred):    # 실제값과 예측값을 사용하여 평균제곱오차 계산
     return np.mean((y_true-y_pred) ** 2)
+
+def cross_entropy(y_true, y_pred, eps=1e-12):
+    y_pred = np.clip(y_pred, eps, 1.0 - eps)
+    return -np.mean(np.sum(y_true * np.log(y_pred), axis=1))
 
 "정확도 계산"
 
@@ -90,19 +104,25 @@ def accuracy(y_true, y_pred):   # 정답과 예측값을 받아서 정확도 계
 
 # 신경망 클래스 정의
 class NeuralNetwork:
-    def __init__(self, input_size, hidden_layers, output_size, learning_rate):
-        self.learning_rate = learning_rate  
-        self.weights = [] 
-        self.biases = []  
-        # 입력, 은닉, 출력층 노드 수
-        layer_sizes = [input_size] + hidden_layers + [output_size]  
-        
-        # 각 레이어 가중치와 편향 초기화
+    def __init__(
+        self,
+        input_size=4096,
+        hidden_layers=[256,196,128],
+        output_size=111,
+        learning_rate=0.0001
+    ):
+        self.input_size = input_size
+        self.hidden_layers = list(hidden_layers)
+        self.output_size = output_size
+        self.learning_rate = learning_rate
+
+        self.weights, self.biases = [], []
+        layer_sizes = [input_size] + self.hidden_layers + [output_size]
         for i in range(len(layer_sizes) - 1):
-            weight = np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * np.sqrt(2.0 / layer_sizes[i])  # 심층 신경망에서 기울기 소실 방지를 위한 he 초기화
-            bias = np.zeros((1, layer_sizes[i + 1]))  # 편향 초기화
-            self.weights.append(weight)
-            self.biases.append(bias)
+            w = np.random.randn(layer_sizes[i], layer_sizes[i+1]) * np.sqrt(2.0 / layer_sizes[i])
+            b = np.zeros((1, layer_sizes[i+1]))
+            self.weights.append(w)
+            self.biases.append(b)
 
     # 순전파
     def forward(self, x, training=True):
@@ -120,7 +140,7 @@ class NeuralNetwork:
 
     # 역전파
     def backward(self, y_true):
-        # 출력층 오차
+        # 출력층 오차 (softmax+cross_entropy)
         deltas = [self.activations[-1] - y_true]
         
         # 은닉층에서의 오차 전파(출력층-> 은닉층 , 은닉층->입력층)
@@ -136,92 +156,86 @@ class NeuralNetwork:
 
 
     # 학습
-    def train(self, x, y, epochs, learning_rate):
+    def train(self, x, y, epochs, learning_rate, batch_size=64):
         self.learning_rate = learning_rate
+        for epoch in range(epochs):
+            total_loss_sum, total_count = 0.0, 0
+            correct = 0
 
-        # 클래스별 데이터 인덱스 생성
-        class_indices = {label: np.where(np.argmax(y, axis=1) == label)[0] for label in range(y.shape[1])}
+            for xb, yb in iterate_minibatches(x, y, batch_size, shuffle=True):
+                out = self.forward(xb, training=True)
+                loss = cross_entropy(yb, out)
+                total_loss_sum += loss * len(xb)
+                total_count    += len(xb)
 
-        for epoch in range(epochs): 
-            if (epoch + 1) % 10 == 0:   #주기적 모델 평가
-                print("모델 범용성 평가")
-                self.evaluate(x, y) 
+                pred = np.argmax(out, axis=1)
+                true = np.argmax(yb, axis=1)
+                correct += np.sum(pred == true)
 
-            total_loss = 0  # 총 손실 초기화
-            correct_predictions = 0  # 정확한 예측 수 초기화
+                self.backward(yb)  # (아래 L2/Dropout을 추가했다면 그에 맞춰 수정)
 
-            # 클래스별 학습 루프
-            for class_label, indices in class_indices.items():
-                np.random.shuffle(indices)  # 클래스 데이터를 섞어서 순차적으로 학습
-                class_x = x[indices]    #클래스 픽셀 데이터
-                class_y = y[indices]    #클래스 레이블 데이터
+            avg_loss = total_loss_sum / max(total_count, 1)
+            acc = 100.0 * correct / max(total_count, 1)
+            print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_loss:.4f}, Train Accuracy: {acc:.2f}%")
 
-                # 순전파
-                output = self.forward(class_x, training=True)   
-                loss = MSE(class_y, output) #실제값과 예측값의 손실 계산
-                total_loss += loss  #총 손실 누적
-
-                # 정확도 계산
-                predictions = np.argmax(output, axis=1) #예측값
-                true_labels = np.argmax(class_y, axis=1)    #실제값
-                correct_predictions += np.sum(predictions == true_labels)   #정확한 예측 수 계산
-
-                # 역전파
-                self.backward(class_y)  
-
-            # 평균 손실 및 학습 정확도 계산
-            average_loss = total_loss / len(x)  # 전체 데이터 크기로 나눔
-            train_accuracy = correct_predictions / len(x) * 100
-
-            print(f"Epoch {epoch + 1}/{epochs}, Train Loss: {average_loss}, Train Accuracy: {train_accuracy:.2f}%")
+            if (epoch + 1) % 10 == 0:
+                print("모델 평가")
+                self.evaluate(x, y)  # 실제로는 val로 분리 권장
 
     # 평가 함수
     def evaluate(self, x, y):
         test_output = self.forward(x, training=False)   #테스트 데이터에 대한 예측값
-        test_loss = MSE(y, test_output) #테스트 데이터에 대한 손실 계산
+        test_loss = cross_entropy(y,test_output) #테스트 데이터에 대한 손실 계산
         test_predictions = np.argmax(test_output, axis=1)   #테스트 데이터 예측값
         test_true_labels = np.argmax(y, axis=1) #테스트 데이터 실제값
         test_accuracy = accuracy(test_true_labels, test_predictions)    #테스트 데이터 정확도 계산
 
         print(f"Test Loss: {test_loss}, Test Accuracy: {test_accuracy * 100:.2f}%")
         return test_loss, test_accuracy
-    
-#시각화
-def visualize_predictions_and_true_images_with_predicted_images(model, test_data, test_labels, num_samples=10):
 
-    # 테스트 데이터에서 무작위로 샘플 선택
+    def save(self, filepath="saved_model.pkl"):
+        with open(filepath, "wb") as f:
+            pickle.dump({"weights": self.weights, "biases": self.biases}, f)
+        print(f"✅ Model saved to {filepath}")
+
+
+    def load(self, filepath="saved_model.pkl"):
+        with open(filepath, "rb") as f:
+            data = pickle.load(f)
+        self.weights = data["weights"]
+        self.biases = data["biases"]
+        print(f"✅ Model loaded from {filepath}")
+
+
+#시각화
+# 시각화 함수 (인덱스 버그 수정 + 안전 처리)
+def visualize_predictions_and_true_images_with_predicted_images(model, test_data, test_labels, num_samples=10):
     indices = random.sample(range(len(test_data)), num_samples)
     sampled_data = test_data[indices]
     sampled_labels = test_labels[indices]
 
-    # 신경망 예측 수행
     predictions = model.forward(sampled_data, training=False)
-    predicted_classes = np.argmax(predictions, axis=1)  # 예측된 클래스
-    true_classes = np.argmax(sampled_labels, axis=1)    # 실제 클래스
+    predicted_classes = np.argmax(predictions, axis=1)
+    true_classes = np.argmax(sampled_labels, axis=1)
 
-    # 시각화 설정
     fig, axes = plt.subplots(2, num_samples, figsize=(num_samples * 2, 5))
-
-    for i, index in enumerate(indices):
-        # Pred: 예측된 클래스에 해당하는 이미지를 찾음
+    for i, idx in enumerate(indices):
         pred_class = predicted_classes[i]
-        pred_image_index = np.argmax(np.argmax(test_labels, axis=1) == pred_class)
-        pred_image = test_data[pred_image_index]
+        pred_indices = np.where(np.argmax(test_labels, axis=1) == pred_class)[0]
 
-        # 예측 이미지 출력
-        axes[0, i].imshow(pred_image.reshape(64, 64), cmap="gray")
+        if len(pred_indices) > 0:
+            pred_image = test_data[random.choice(pred_indices)]
+            axes[0, i].imshow(pred_image.reshape(64, 64), cmap="gray")
         axes[0, i].axis("off")
         axes[0, i].set_title(f"Pred: {pred_class}", color="green" if pred_class == true_classes[i] else "red")
 
-        # True: 실제 이미지 출력
         axes[1, i].imshow(sampled_data[i].reshape(64, 64), cmap="gray")
         axes[1, i].axis("off")
         axes[1, i].set_title(f"True: {true_classes[i]}")
 
-    # 전체 레이아웃 조정
-    fig.suptitle("Predicted vs. True Images", fontsize=16)
     plt.tight_layout()
     plt.show()
+
 
 if __name__ == "__main__":    
     # 데이터 로드
@@ -236,5 +250,9 @@ if __name__ == "__main__":
 
     # 테스트 데이터로 평가
     nn.evaluate(test_data, test_labels)
+
+    nn.save("saved_model.pkl")
     # 시각화 함수 호출
+
+    nn.load("saved_model.pkl")
     visualize_predictions_and_true_images_with_predicted_images(nn, test_data, test_labels)

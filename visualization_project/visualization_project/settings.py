@@ -78,10 +78,10 @@ WSGI_APPLICATION = "visualization_project.wsgi.application"
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / "db.sqlite3",  # Path 객체를 사용하여 경로 설정
+        'ENGINE': 'django.db.backends.dummy',
     }
 }
+
 
 
 # Password validation

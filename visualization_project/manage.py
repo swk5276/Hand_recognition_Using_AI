@@ -3,7 +3,7 @@
 import os
 import sys
 
-
+# 프로젝트 진입점
 def main():
     """Run administrative tasks."""
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "visualization_project.settings")
