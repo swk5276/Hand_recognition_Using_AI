@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # 서버 환경에서는 꼭 Agg 백엔드
 import matplotlib.pyplot as plt
-from core.Neural_Network import NeuralNetwork, load_data
+from visualization_project.core.MLP_Neural_Network import NeuralNetwork, load_data
 
 logger = logging.getLogger(__name__)
 
