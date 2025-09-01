@@ -1,6 +1,6 @@
 <img width="1910" height="999" alt="image" src="https://github.com/user-attachments/assets/e2202162-c595-47d5-9dc6-5cebc5353f34" />
 
-Hand Recognition Using AI 🖐️
+### Hand Recognition Using AI 🖐️
 
 NumPy 기반 CNN & MLP 직접 구현 + Django Web 시각화 시스템
 
