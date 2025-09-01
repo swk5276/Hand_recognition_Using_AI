@@ -1,77 +1,143 @@
+# visualizer/views.py
 from django.shortcuts import render, HttpResponse
-import random, io, base64, logging
-from pathlib import Path
+import io, base64, random, logging
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")  # 서버 환경에서는 꼭 Agg 백엔드
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from visualization_project.core.MLP_Neural_Network import NeuralNetwork, load_data
+
+from core.config import OUTPUT_SIZE, NORM_STATS_PATH, MLP_WEIGHTS_PATH, CNN_WEIGHTS_PATH
+from core.mlp_numpy import NeuralNetwork as MLP, load_data as load_mlp_data
+from core.cnn_numpy import CNNNetwork as CNN
 
 logger = logging.getLogger(__name__)
 
-# 프로젝트 루트 기준 절대경로 (visualization_project/)
-BASE_DIR   = Path(__file__).resolve().parents[1]
-MODEL_PATH = BASE_DIR / "core" / "saved_model.pkl"   # ✅ core/saved_model.pkl 고정
+def _img_to_base64(img2d, title=None):
+    fig, ax = plt.subplots(1, 1, figsize=(3.6, 3.6))
+    ax.imshow(img2d, cmap="gray")
+    ax.axis("off")
+    if title:
+        ax.set_title(title)
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    buf.close()
+    plt.close(fig)
+    return b64
 
-# python manage.py runserver 127.0.0.1:8000
-
-def visualize_predictions(request):
-    logger.info("Starting visualize_predictions view.")
+def visualize_single(request):
     try:
-        # 테스트 데이터 로드 (추론용)
-        test_data, test_labels = load_data('test', 'test_data.csv', output_size=111)
+        # --- 데이터 로드 & 정규화 ---
+        X_test, Y_test = load_mlp_data("test", "test_data.csv", OUTPUT_SIZE)
+        stats = np.load(NORM_STATS_PATH)
+        mean, std = stats["mean"], stats["std"]
+        Xn = (X_test - mean) / std
 
-        # 신경망 객체 생성
-        nn = NeuralNetwork()
+        # --- 인덱스 결정 (GET ?idx=) ---
+        if "idx" in request.GET:
+            try:
+                idx = int(request.GET["idx"])
+            except ValueError:
+                idx = random.randrange(len(Xn))
+            idx = max(0, min(idx, len(Xn)-1))
+        else:
+            idx = random.randrange(len(Xn))
 
-        # 학습된 모델 로드
-        if not MODEL_PATH.exists():
-            raise FileNotFoundError(f"모델 파일이 없습니다: {MODEL_PATH}")
-        nn.load(str(MODEL_PATH))
+        x = Xn[idx:idx+1]                    # (1, 4096)
+        true = int(np.argmax(Y_test[idx]))   # 정답 라벨
 
-        # 무작위 샘플 추론
-        indices = random.sample(range(len(test_data)), 10)
-        sampled_data = test_data[indices]
-        sampled_labels = test_labels[indices]
-        predictions = nn.forward(sampled_data, training=False)
-        predicted_classes = np.argmax(predictions, axis=1)
-        true_classes = np.argmax(sampled_labels, axis=1)
+        # --- 모델 로드 ---
+        mlp = MLP();  mlp.load(str(MLP_WEIGHTS_PATH))
+        cnn = CNN();  cnn.load(str(CNN_WEIGHTS_PATH))
 
-        # 시각화
-        fig, axes = plt.subplots(2, 10, figsize=(20, 5))
-        for i in range(10):
-            # True 이미지
-            axes[1, i].imshow(sampled_data[i].reshape(64, 64), cmap='gray')
-            axes[1, i].axis('off')
-            axes[1, i].set_title(f"True: {true_classes[i]}")
+        # --- 예측 ---
+        mlp_probs = mlp.forward(x, training=False).reshape(-1)
+        cnn_probs = cnn.forward(x, training=False).reshape(-1)
 
-            # Pred 이미지
-            pred_class = predicted_classes[i]
-            pred_indices = np.where(np.argmax(test_labels, axis=1) == pred_class)[0]
-            if len(pred_indices) > 0:
-                pred_image = test_data[pred_indices[0]]
-                axes[0, i].imshow(pred_image.reshape(64, 64), cmap='gray')
-                axes[0, i].axis('off')
-                axes[0, i].set_title(
-                    f"Pred: {pred_class}",
-                    color=("green" if pred_class == true_classes[i] else "red")
-                )
-            else:
-                axes[0, i].axis('off')
-                axes[0, i].set_title(f"Pred: {pred_class} (No Match)", color="red")
+        mlp_pred = int(np.argmax(mlp_probs))
+        cnn_pred = int(np.argmax(cnn_probs))
 
-        plt.tight_layout()
+        # --- 원본(정규화 전) 샘플 이미지 ---
+        true_img_b64 = _img_to_base64(
+            X_test[idx].reshape(64, 64),
+            title=f"Index {idx} • True: {true}"
+        )
 
-        # Base64 인코딩
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png')
-        buffer.seek(0)
-        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-        buffer.close()
-        plt.close(fig)
+        # --- 예측 클래스 대표 이미지(테스트셋에서 같은 라벨 중 1장 선택) ---
+        def pick_pred_image_base64(pred_label, title_prefix):
+            matches = np.where(np.argmax(Y_test, axis=1) == pred_label)[0]
+            if matches.size == 0:
+                return None
+            pick = int(random.choice(matches))
+            return _img_to_base64(
+                X_test[pick].reshape(64, 64),
+                title=f"{title_prefix} sample of label {pred_label} (idx {pick})"
+            )
 
-        return render(request, 'visualizer/visualize.html', {'image_base64': image_base64})
+        mlp_pred_img_b64 = pick_pred_image_base64(mlp_pred, "MLP")
+        cnn_pred_img_b64 = pick_pred_image_base64(cnn_pred, "CNN")
+
+        # --- Top-5 표를 위해 상위 확률 추출(옵션) ---
+        mlp_top5_idx = np.argsort(mlp_probs)[-5:][::-1]
+        cnn_top5_idx = np.argsort(cnn_probs)[-5:][::-1]
+        mlp_top5 = [(int(i), float(mlp_probs[i])) for i in mlp_top5_idx]
+        cnn_top5 = [(int(i), float(cnn_probs[i])) for i in cnn_top5_idx]
+
+        ctx = {
+            "idx": idx,
+            "image_base64": true_img_b64,          # 원본/정답 이미지
+            "true_label": true,
+
+            "mlp_pred": mlp_pred,
+            "cnn_pred": cnn_pred,
+            "mlp_top5": mlp_top5,
+            "cnn_top5": cnn_top5,
+            "same": (mlp_pred == cnn_pred),
+
+            # ✅ 추가: 예측 클래스 대표 이미지
+            "mlp_pred_image_base64": mlp_pred_img_b64,
+            "cnn_pred_image_base64": cnn_pred_img_b64,
+        }
+        return render(request, "visualizer/visualize_single.html", ctx)
 
     except Exception as e:
-        logger.exception("visualize_predictions failed")
+        logger.exception("visualize_single failed")
+        return HttpResponse(f"Error: {e}", status=500)
+
+
+def _predict_and_draw(model, title: str):
+    # 데이터 로드
+    test_X, test_Y = load_csv_dataset('test', 'test_data.csv')
+    # 정규화 통계 로드 후 적용
+    mean, std = load_norm_stats()
+    test_X = apply_norm(test_X, mean, std)
+
+    # 이미지 Base64 생성
+    img_b64 = draw_pred_vs_true_grid(model, test_X, test_Y, num_samples=10, title=title)
+    return img_b64
+
+def visualize_mlp(request):
+    try:
+        model = NeuralNetwork()
+        if not MLP_WEIGHTS_PATH.exists():
+            return HttpResponse(f"MLP 모델 파일이 없습니다: {MLP_WEIGHTS_PATH}", status=500)
+        model.load(str(MLP_WEIGHTS_PATH))
+        image_base64 = _predict_and_draw(model, title="MLP Predictions")
+        return render(request, "visualizer/visualize.html", {"image_base64": image_base64, "title": "MLP"})
+    except Exception as e:
+        logger.exception("visualize_mlp failed")
+        return HttpResponse(f"Error: {e}", status=500)
+
+def visualize_cnn(request):
+    try:
+        model = CNNNetwork()
+        if not CNN_WEIGHTS_PATH.exists():
+            return HttpResponse(f"CNN 모델 파일이 없습니다: {CNN_WEIGHTS_PATH}", status=500)
+        model.load(str(CNN_WEIGHTS_PATH))
+        image_base64 = _predict_and_draw(model, title="CNN Predictions")
+        return render(request, "visualizer/visualize.html", {"image_base64": image_base64, "title": "CNN"})
+    except Exception as e:
+        logger.exception("visualize_cnn failed")
         return HttpResponse(f"Error: {e}", status=500)

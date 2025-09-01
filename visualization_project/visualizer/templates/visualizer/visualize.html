@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Visualization</title>
+  <meta charset="utf-8"/>
+  <title>{{ title }} Visualization</title>
 </head>
 <body>
-    <h1>Generated Graph</h1>
-    <img src="data:image/png;base64,{{ image_base64 }}" alt="Graph">
+  <h2>{{ title }} — Prediction vs True</h2>
+  <img src="data:image/png;base64,{{ image_base64 }}" alt="visualization" style="max-width:100%; height:auto;"/>
 </body>
 </html>

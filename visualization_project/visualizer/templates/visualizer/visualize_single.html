@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <title>Hand Recognition • Single Image • MLP vs CNN</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#ffffff; --fg:#111; --muted:#666; --card:#fff; --border:#e6e6e6;
+      --ok:#0e9f6e; --bad:#dc2626; --pill:#f1f5f9; --accent:#2563eb;
+      --bar:#e5e7eb; --shadow:0 6px 18px rgba(0,0,0,.08);
+    }
+    [data-theme="dark"]{
+      --bg:#0b1321; --fg:#f3f4f6; --muted:#9aa4b2; --card:#0f172a; --border:#1f2937;
+      --ok:#22c55e; --bad:#f87171; --pill:#111827; --accent:#60a5fa; --bar:#1f2a3a;
+      --shadow:0 8px 24px rgba(0,0,0,.35);
+    }
+
+    *{box-sizing:border-box}
+    body{margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:var(--bg); color:var(--fg);}
+    .container{max-width:1200px; margin:28px auto; padding:0 20px}
+    header{display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px}
+    .title{font-size:clamp(22px,3vw,28px); font-weight:800; letter-spacing:.2px}
+    .subtitle{color:var(--muted); font-size:.95rem}
+
+    .controls{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+    .pill{background:var(--pill); border:1px solid var(--border); padding:6px 10px; border-radius:999px; color:var(--muted); font-weight:600}
+    input[type=number]{width:120px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:transparent; color:var(--fg)}
+    button{border:1px solid var(--border); background:var(--card); color:var(--fg); padding:8px 12px; border-radius:10px; cursor:pointer; box-shadow:var(--shadow); transition:transform .05s ease}
+    button:hover{transform:translateY(-1px); border-color:var(--accent)}
+    .btn-primary{background:var(--accent); color:#fff; border-color:transparent}
+    .btn-ghost{background:transparent; border:1px dashed var(--border)}
+    .switch{display:flex; align-items:center; gap:8px}
+
+    .grid{display:grid; grid-template-columns: 1.2fr 1fr 1fr; gap:20px; margin-top:18px}
+    .card{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:var(--shadow)}
+    .card h3{margin:0 0 10px 0; font-size:1.05rem}
+    .soft{color:var(--muted); font-weight:600}
+
+    .img{display:block; width:100%; height:auto; border-radius:12px; border:1px solid var(--border)}
+    .meta{margin-top:8px; font-size:.95rem; color:var(--muted)}
+    .badge{display:inline-block; padding:3px 8px; border-radius:999px; font-size:.8rem; font-weight:700}
+    .badge-ok{background: rgba(34,197,94,0.15); color: var(--ok);}
+    .badge-bad{background: rgba(220,38,38,0.15); color: var(--bad);}
+
+    table{width:100%; border-collapse:separate; border-spacing:0 8px}
+    th{color:var(--muted); font-weight:700; font-size:.85rem; text-align:left}
+    td{padding:6px 0; vertical-align:middle}
+    .label{font-variant-numeric:tabular-nums; padding-right:8px}
+    .prob{font-variant-numeric:tabular-nums; width:64px; text-align:right}
+    .bar{height:9px; width:100%; background:var(--bar); border-radius:999px; position:relative; overflow:hidden; border:1px solid var(--border)}
+    .fill{position:absolute; top:0; left:0; bottom:0; background:var(--accent); border-radius:999px}
+    .row-flex{display:flex; align-items:center; gap:10px}
+
+    .stack{display:grid; grid-template-columns:1fr; gap:8px}
+    .note{font-size:.88rem; color:var(--muted); margin-top:6px}
+    .footer{margin-top:18px; color:var(--muted); font-size:.85rem}
+
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <div class="title"><span class="soft">MLP vs CNN</span> 인공신경망 기반 한글 필기체 인식 비교 </div>
+        <div class="subtitle">NumPy를 이용한 MLP/CNN 신경망 구현 및 추론 비교 · 64×64 흑백 이미지 · {{ OUTPUT_SIZE|default_if_none:"" }} classes</div>
+      </div>
+      <div class="switch">
+        <span class="soft">Theme</span>
+        <button id="toggleTheme" class="btn-ghost">🌙/☀️</button>
+      </div>
+    </header>
+
+    <section class="controls">
+      <form method="get" action="" class="row-flex">
+        <label class="soft">Index</label>
+        <input type="number" name="idx" value="{{ idx }}" min="0" />
+        <button class="btn-primary">Go</button>
+      </form>
+      <button id="prevBtn">← Prev</button>
+      <button id="nextBtn">Next →</button>
+      <button id="randBtn" class="btn-ghost">🎲 Random</button>
+      <span class="pill">{{ same|yesno:"Same Prediction,Different" }}</span>
+    </section>
+
+    <section class="grid">
+      <!-- Ground Truth -->
+      <div class="card">
+        <h3>Ground Truth</h3>
+        <img class="img" src="data:image/png;base64,{{ image_base64 }}" alt="sample" />
+        <div class="meta">Index <b>{{ idx }}</b> · True label <b>{{ true_label }}</b></div>
+        <div class="note">정규화 전 원본 이미지를 표시합니다.</div>
+      </div>
+
+      <!-- MLP -->
+      <div class="card">
+        <h3>MLP Prediction
+          {% if mlp_pred == true_label %}
+            <span class="badge badge-ok">Correct</span>
+          {% else %}
+            <span class="badge badge-bad">Wrong</span>
+          {% endif %}
+        </h3>
+
+        {% if mlp_pred_image_base64 %}
+          <div class="note">Predicted class example (from test set, same label)</div>
+          <img class="img" src="data:image/png;base64,{{ mlp_pred_image_base64 }}" alt="mlp predicted example" />
+        {% endif %}
+
+        <div class="note" style="margin-top:10px">Top-5 probabilities</div>
+        <div class="stack">
+          {% for lab, pr in mlp_top5 %}
+            <div class="row-flex">
+              <div class="label" style="width:40px">{{ lab }}</div>
+              <div class="bar"><div class="fill" style="width: {{ pr|floatformat:4|add:'%' }}"></div></div>
+              <div class="prob">{{ pr|floatformat:4 }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- CNN -->
+      <div class="card">
+        <h3>CNN Prediction
+          {% if cnn_pred == true_label %}
+            <span class="badge badge-ok">Correct</span>
+          {% else %}
+            <span class="badge badge-bad">Wrong</span>
+          {% endif %}
+        </h3>
+
+        {% if cnn_pred_image_base64 %}
+          <div class="note">Predicted class example (from test set, same label)</div>
+          <img class="img" src="data:image/png;base64,{{ cnn_pred_image_base64 }}" alt="cnn predicted example" />
+        {% endif %}
+
+        <div class="note" style="margin-top:10px">Top-5 probabilities</div>
+        <div class="stack">
+          {% for lab, pr in cnn_top5 %}
+            <div class="row-flex">
+              <div class="label" style="width:40px">{{ lab }}</div>
+              <div class="bar"><div class="fill" style="width: {{ pr|floatformat:4|add:'%' }}"></div></div>
+              <div class="prob">{{ pr|floatformat:4 }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">Tip: 키보드 <b>←/→</b>로 이전/다음, <b>R</b>로 랜덤 이동 · 라이트/다크 전환 가능</div>
+  </div>
+
+  <script>
+    // 테마 토글 (localStorage 사용)
+    const root = document.documentElement;
+    const savedTheme = localStorage.getItem("theme") || "light";
+    root.setAttribute("data-theme", savedTheme);
+    document.getElementById("toggleTheme").onclick = () => {
+      const cur = root.getAttribute("data-theme");
+      const next = cur === "light" ? "dark" : "light";
+      root.setAttribute("data-theme", next);
+      localStorage.setItem("theme", next);
+    };
+
+    // 인덱스 이동 도우미
+    const curIdx = Number("{{ idx }}");
+    const nav = (i) => { const u = new URL(window.location.href); u.searchParams.set("idx", i); window.location.href = u.toString(); };
+    document.getElementById("prevBtn").onclick = () => nav(Math.max(0, curIdx - 1));
+    document.getElementById("nextBtn").onclick = () => nav(curIdx + 1);
+    document.getElementById("randBtn").onclick = () => nav(Math.floor(Math.random()*100000)); // 큰 수여도 서버에서 클램프됨
+
+    // 키보드 단축키
+    window.addEventListener("keydown", (e)=>{
+      if(e.key === "ArrowLeft"){ nav(Math.max(0, curIdx - 1)); }
+      if(e.key === "ArrowRight"){ nav(curIdx + 1); }
+      if(e.key.toLowerCase() === "r"){ nav(Math.floor(Math.random()*100000)); }
+    });
+  </script>
+</body>
+</html>
