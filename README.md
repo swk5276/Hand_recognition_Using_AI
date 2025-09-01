@@ -1,5 +1,4 @@
 # Hand Recognition Using AI
-![제목 없음1](https://github.com/user-attachments/assets/f4b8a6ce-fdb0-44a8-a4d3-cd7211572fc5)
 <img width="1910" height="999" alt="image" src="https://github.com/user-attachments/assets/e2202162-c595-47d5-9dc6-5cebc5353f34" />
 
 ## 프로젝트 개요
